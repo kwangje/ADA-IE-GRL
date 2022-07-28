@@ -1,0 +1,149 @@
+seed: 1988
+__set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
+
+data_folder: /media/beck/ssd/datasets_opensource/sr/processed_data
+
+output_folder: !ref ./results/ADA/<seed>
+save_folder: !ref <output_folder>/save
+train_log: !ref <output_folder>/train_log.txt
+
+train_annotation: !ref <data_folder>/train_dc.json
+dev_annotation: !ref <data_folder>/valid_dc.json
+eval_annotation: !ref <data_folder>/valid_dc.json
+
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+  save_file: !ref <train_log>
+
+loss_metric: !name:loss.ADAIE_loss.ADAIE_loss
+spk_loss_metric: !new:speechbrain.nnet.losses.LogSoftmaxWrapper
+  loss_fn: !new:speechbrain.nnet.losses.AdditiveAngularMargin
+    margin: 0.2
+    scale: 30
+triplet_loss_metric: !new:loss.TripletLoss.HardTripletLoss
+  margin: 0.1
+  hardest: False
+
+# save checkpoint every N min
+ckpt_interval_minutes: 30 
+
+# Feature parameters
+n_mels: 80
+dim_neck_fbanks: 128
+emb_dim: 256
+
+# Training Parameters
+sample_rate: 16000
+sentence_len: 3.0
+number_of_epochs: 1 # 100
+batch_size: 2 ### point
+lr_start: 0.0001
+
+dataloader_options:
+  batch_size: !ref <batch_size>
+  shuffle: False
+  drop_last: True
+
+
+augment_folder: /media/beck/ssd/datasets_opensource/sr/augment
+
+env_corrupt: !new:speechbrain.lobes.augment.EnvCorrupt
+  openrir_folder: !ref <augment_folder>
+  babble_prob: 0.0
+  reverb_prob: 0.0
+  noise_prob: 1.0
+  noise_snr_low: 0
+  noise_snr_high: 15
+
+augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
+  sample_rate: !ref <sample_rate>
+  speeds: [95, 100, 105]
+
+mean_var_norm: !new:speechbrain.processing.features.InputNormalization
+  norm_type: sentence
+  std_norm: False
+
+raw_encoder: !new:models.ADA_IE.RawEncoder
+  activation: !name:torch.nn.LeakyReLU
+
+mfcc: !new:datasets.MFCC.MFCC
+  n_mels: !ref <n_mels>
+  sample_rate: 16000
+  f_max: 8000
+  hop_length: 10
+
+fbanks_encoder: !new:models.ECAPA_TDNN.ECAPA_TDNN
+  input_size:  !ref <n_mels>
+  channels: [1024, 1024, 1024, 1024, 3072]
+  kernel_sizes: [5, 3, 3, 3, 1]
+  dilations: [1, 2, 3, 4, 1]
+  attention_channels: 128
+  lin_neurons:  !ref <emb_dim>
+
+classifier_spk: !new:models.ADA_IE.SPK_Decoder
+  input_size:   !ref <emb_dim>
+  lin_blocks: 0
+  lin_neurons: 512
+  out_neurons: 2742 ### spk_numbers
+
+classifier_ag: !new:models.ADA_IE.AG_Decoder
+  input_shape: [null, null, !ref <emb_dim>]
+  activation: !name:torch.nn.LeakyReLU
+  lin_blocks: 1
+  lin_neurons: 512
+
+discriminator_c: !new:models.ADA_IE.C_Discriminator
+  input_size:   !ref <emb_dim>
+  lin_blocks: 1
+  lin_neurons: 512
+  out_neurons: 2 # child adult elder
+
+batch_norm: !new:models.ECAPA_TDNN.BatchNorm1d
+  input_size:  6656
+
+conv_1d: !new:models.ECAPA_TDNN.Conv1d
+  in_channels: 6656
+  out_channels: !ref <emb_dim>
+  kernel_size: 1
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+  limit: !ref <number_of_epochs>
+
+lr_scheduler: !new:speechbrain.nnet.schedulers.ReduceLROnPlateau
+  factor: 0.8
+  patience: 2
+  dont_halve_until_epoch: 5
+
+modules:
+  fbanks_encoder: !ref <fbanks_encoder>
+  env_corrupt: !ref <env_corrupt>
+  augmentation: !ref <augmentation>
+  classifier_spk: !ref <classifier_spk>
+  classifier_ag: !ref <classifier_ag>
+  mean_var_norm: !ref <mean_var_norm>
+  discriminator_c: !ref <discriminator_c>
+  spk_loss_metric: !ref <spk_loss_metric>
+  triplet_loss_metric: !ref <triplet_loss_metric>
+  batch_norm: !ref <batch_norm>
+  raw_encoder: !ref <raw_encoder>
+  conv_1d: !ref <conv_1d>
+  mfcc: !ref <mfcc>
+
+
+label_encoder: !new:speechbrain.dataio.encoder.CategoricalEncoder
+
+opt_class: !name:torch.optim.Adam
+  lr: !ref <lr_start>
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+  checkpoints_dir: !ref <save_folder>
+  recoverables:
+    fbanks_encoder: !ref <fbanks_encoder>
+    classifier_spk: !ref <classifier_spk>
+    classifier_ag: !ref <classifier_ag>
+    normalizer: !ref <mean_var_norm>
+    counter: !ref <epoch_counter>
+    discriminator_c: !ref <discriminator_c>
+    batch_norm: !ref <batch_norm>
+    raw_encoder: !ref <raw_encoder>
+    conv_1d: !ref <conv_1d>

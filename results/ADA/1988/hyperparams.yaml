@@ -1,0 +1,152 @@
+# Generated 2022-07-28 from:
+# /home/beck/Desktop/ADA-IE-GRL/yaml/ADA_IE.yaml
+# yamllint disable
+seed: 1988
+__set_seed: !!python/object/apply:torch.manual_seed [1988]
+
+data_folder: /media/beck/ssd/datasets_opensource/sr/processed_data
+
+output_folder: ./results/ADA/1988
+save_folder: ./results/ADA/1988/save
+train_log: ./results/ADA/1988/train_log.txt
+
+train_annotation: /media/beck/ssd/datasets_opensource/sr/processed_data/train_dc.json
+dev_annotation: /media/beck/ssd/datasets_opensource/sr/processed_data/valid_dc.json
+eval_annotation: /media/beck/ssd/datasets_opensource/sr/processed_data/valid_dc.json
+
+
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+  save_file: ./results/ADA/1988/train_log.txt
+
+loss_metric: !name:loss.ADAIE_loss.ADAIE_loss
+spk_loss_metric: &id008 !new:speechbrain.nnet.losses.LogSoftmaxWrapper
+  loss_fn: !new:speechbrain.nnet.losses.AdditiveAngularMargin
+    margin: 0.2
+    scale: 30
+triplet_loss_metric: &id009 !new:loss.TripletLoss.HardTripletLoss
+  margin: 0.1
+  hardest: false
+
+# save checkpoint every N min
+ckpt_interval_minutes: 30
+
+# Feature parameters
+n_mels: 80
+dim_neck_fbanks: 128
+emb_dim: 256
+
+# Training Parameters
+sample_rate: 16000
+sentence_len: 3.0
+number_of_epochs: 1 # 100
+batch_size: 2 ### point
+lr_start: 0.0001
+
+dataloader_options:
+  batch_size: 2
+  shuffle: false
+  drop_last: true
+
+
+augment_folder: /media/beck/ssd/datasets_opensource/sr/augment
+
+env_corrupt: &id002 !new:speechbrain.lobes.augment.EnvCorrupt
+  openrir_folder: /media/beck/ssd/datasets_opensource/sr/augment
+  babble_prob: 0.0
+  reverb_prob: 0.0
+  noise_prob: 1.0
+  noise_snr_low: 0
+  noise_snr_high: 15
+
+augmentation: &id003 !new:speechbrain.lobes.augment.TimeDomainSpecAugment
+  sample_rate: 16000
+  speeds: [95, 100, 105]
+
+mean_var_norm: &id006 !new:speechbrain.processing.features.InputNormalization
+  norm_type: sentence
+  std_norm: false
+
+raw_encoder: &id011 !new:models.ADA_IE.RawEncoder
+  activation: !name:torch.nn.LeakyReLU
+
+mfcc: &id013 !new:datasets.MFCC.MFCC
+
+
+  n_mels: 80
+  sample_rate: 16000
+  f_max: 8000
+  hop_length: 10
+
+fbanks_encoder: &id001 !new:models.ECAPA_TDNN.ECAPA_TDNN
+  input_size: 80
+  channels: [1024, 1024, 1024, 1024, 3072]
+  kernel_sizes: [5, 3, 3, 3, 1]
+  dilations: [1, 2, 3, 4, 1]
+  attention_channels: 128
+  lin_neurons: 256
+
+classifier_spk: &id004 !new:models.ADA_IE.SPK_Decoder
+  input_size: 256
+  lin_blocks: 0
+  lin_neurons: 512
+  out_neurons: 2742 ### spk_numbers
+
+classifier_ag: &id005 !new:models.ADA_IE.AG_Decoder
+  input_shape: [null, null, 256]
+  activation: !name:torch.nn.LeakyReLU
+  lin_blocks: 1
+  lin_neurons: 512
+
+discriminator_c: &id007 !new:models.ADA_IE.C_Discriminator
+  input_size: 256
+  lin_blocks: 1
+  lin_neurons: 512
+  out_neurons: 2 # child adult elder
+
+batch_norm: &id010 !new:models.ECAPA_TDNN.BatchNorm1d
+  input_size: 6656
+
+conv_1d: &id012 !new:models.ECAPA_TDNN.Conv1d
+  in_channels: 6656
+  out_channels: 256
+  kernel_size: 1
+
+epoch_counter: &id014 !new:speechbrain.utils.epoch_loop.EpochCounter
+  limit: 1
+
+lr_scheduler: !new:speechbrain.nnet.schedulers.ReduceLROnPlateau
+  factor: 0.8
+  patience: 2
+  dont_halve_until_epoch: 5
+
+modules:
+  fbanks_encoder: *id001
+  env_corrupt: *id002
+  augmentation: *id003
+  classifier_spk: *id004
+  classifier_ag: *id005
+  mean_var_norm: *id006
+  discriminator_c: *id007
+  spk_loss_metric: *id008
+  triplet_loss_metric: *id009
+  batch_norm: *id010
+  raw_encoder: *id011
+  conv_1d: *id012
+  mfcc: *id013
+label_encoder: !new:speechbrain.dataio.encoder.CategoricalEncoder
+
+opt_class: !name:torch.optim.Adam
+  lr: 0.0001
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+  checkpoints_dir: ./results/ADA/1988/save
+  recoverables:
+    fbanks_encoder: *id001
+    classifier_spk: *id004
+    classifier_ag: *id005
+    normalizer: *id006
+    counter: *id014
+    discriminator_c: *id007
+    batch_norm: *id010
+    raw_encoder: *id011
+    conv_1d: *id012
